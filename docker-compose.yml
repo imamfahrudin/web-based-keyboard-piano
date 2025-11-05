@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  piano-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: web-based-keyboard-piano
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+    networks:
+      - piano-network
+
+networks:
+  piano-network:
+    driver: bridge
