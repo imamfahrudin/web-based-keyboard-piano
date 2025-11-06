@@ -58,6 +58,8 @@ const sustainSlider = document.getElementById('sustain-slider');
 const sustainValue = document.getElementById('sustain-value');
 const releaseSlider = document.getElementById('release-slider');
 const releaseValue = document.getElementById('release-value');
+const sustainDurationSlider = document.getElementById('sustain-duration-slider');
+const sustainDurationValue = document.getElementById('sustain-duration-value');
 const adsrResetBtn = document.getElementById('adsr-reset');
 
 // Scale DOM elements
@@ -95,6 +97,9 @@ const DEFAULT_ADSR = {
   release: 1.5
 };
 
+// Default sustain duration
+const DEFAULT_SUSTAIN_DURATION = 1000; // 1 second
+
 // Scale highlighting state
 let currentScale = {
   root: 'C',
@@ -112,6 +117,7 @@ const STORAGE_KEYS = {
   METRONOME_VOLUME: 'metronome_volume',
   TIME_SIGNATURE: 'time_signature',
   ADSR: 'piano_adsr',
+  SUSTAIN_DURATION: 'piano_sustain_duration',
   SCALE: 'piano_scale',
   TRANSPOSE: 'piano_transpose',
   SHEET_VISIBLE: 'sheet_visible',
@@ -222,6 +228,12 @@ function loadSettings() {
   sustainValue.textContent = savedADSR.sustain.toFixed(2);
   releaseSlider.value = savedADSR.release;
   releaseValue.textContent = `${savedADSR.release.toFixed(1)}s`;
+  
+  // Load sustain duration
+  sustainDuration = loadFromStorage(STORAGE_KEYS.SUSTAIN_DURATION, DEFAULT_SUSTAIN_DURATION);
+  const durationSeconds = sustainDuration / 1000;
+  sustainDurationSlider.value = durationSeconds;
+  sustainDurationValue.textContent = durationSeconds >= 30 ? '∞' : `${durationSeconds.toFixed(1)}s`;
   
   // Load volume
   const savedVolume = loadFromStorage(STORAGE_KEYS.VOLUME, -12);
@@ -629,6 +641,10 @@ const saveADSRDebounced = debounce((envelope) => {
   saveToStorage(STORAGE_KEYS.ADSR, envelope);
 }, 300);
 
+const saveSustainDurationDebounced = debounce((duration) => {
+  saveToStorage(STORAGE_KEYS.SUSTAIN_DURATION, duration);
+}, 300);
+
 attackSlider.addEventListener('input', (e) => {
   const value = parseFloat(e.target.value);
   adsrEnvelope.attack = value;
@@ -661,6 +677,13 @@ releaseSlider.addEventListener('input', (e) => {
   saveADSRDebounced(adsrEnvelope);
 });
 
+sustainDurationSlider.addEventListener('input', (e) => {
+  const value = parseFloat(e.target.value);
+  sustainDuration = value * 1000; // Convert seconds to milliseconds
+  sustainDurationValue.textContent = value >= 30 ? '∞' : `${value.toFixed(1)}s`;
+  saveSustainDurationDebounced(sustainDuration);
+});
+
 // ADSR reset button
 adsrResetBtn.addEventListener('click', () => {
   // Reset to default values
@@ -679,9 +702,14 @@ adsrResetBtn.addEventListener('click', () => {
   releaseSlider.value = DEFAULT_ADSR.release;
   releaseValue.textContent = `${DEFAULT_ADSR.release.toFixed(1)}s`;
   
+  sustainDuration = DEFAULT_SUSTAIN_DURATION;
+  sustainDurationSlider.value = DEFAULT_SUSTAIN_DURATION / 1000;
+  sustainDurationValue.textContent = (DEFAULT_SUSTAIN_DURATION / 1000) >= 30 ? '∞' : `${(DEFAULT_SUSTAIN_DURATION / 1000).toFixed(1)}s`;
+  
   // Apply to synth and save
   updateSynthADSR();
   saveToStorage(STORAGE_KEYS.ADSR, adsrEnvelope);
+  saveToStorage(STORAGE_KEYS.SUSTAIN_DURATION, sustainDuration);
 });
 
 // Scale highlighting functions
@@ -935,7 +963,8 @@ const heldNotes = new Set();
 const particleIntervals = new Map();
 const sustainedNotes = new Map();
 let isSustainOn = false;
-const sustainDuration = 1000; // Shortened to 1 second
+// Sustain duration state
+let sustainDuration = 1000; // milliseconds
 
 // Handle audio context autoplay policy
 document.addEventListener('click', async () => {
@@ -1203,6 +1232,13 @@ function scheduleSustainRelease(note) {
   if (sustainedNotes.has(note)) {
     clearTimeout(sustainedNotes.get(note));
   }
+  
+  // If sustain duration is at maximum (30s), treat as infinite - don't set timeout
+  if (sustainDuration >= 30000) {
+    sustainedNotes.set(note, null); // Mark as sustained but no timeout
+    return;
+  }
+  
   const timeout = setTimeout(() => {
     if (!heldNotes.has(note) && isSustainOn) {
       releaseNote(note);
@@ -1216,7 +1252,10 @@ function releaseSustainedNotes() {
   activeNotes.forEach(note => {
     if (!heldNotes.has(note)) {
       if (sustainedNotes.has(note)) {
-        clearTimeout(sustainedNotes.get(note));
+        const timeout = sustainedNotes.get(note);
+        if (timeout !== null) {
+          clearTimeout(timeout);
+        }
         sustainedNotes.delete(note);
       }
       releaseNote(note);
